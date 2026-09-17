@@ -1,0 +1,93 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. የተጠቃሚውን መረጃ ከ /users ሰነድ የሚያነብ ፈንክሽን
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // 2. የተመዘገበ ተጠቃሚ (Logged in user) መሆኑን ማረጋገጫ
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // 3. ሱፐር አድሚን መሆኑን ማረጋገጫ
+    function isSuperAdmin() {
+      return isAuthenticated() && getUserData().role == 'super_admin';
+    }
+
+    // 4. የተጠቃሚው storeId ከሰነዱ storeId ጋር እኩል መሆኑን ማረጋገጫ (Multi-tenant match)
+    function isTenantMember(storeId) {
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        (request.auth.token != null && request.auth.token.storeId == storeId) ||
+        (getUserData().store_id == storeId || getUserData().storeId == storeId)
+      );
+    }
+
+    // --- የሱፐር አድሚን የወጪና የገቢ መዝገብ ጥበቃ ---
+    match /system_expenses/{expenseId} {
+      allow read, write: if isSuperAdmin();
+    }
+    match /system_admin_logs/{logId} {
+      allow read, write: if isSuperAdmin();
+    }
+
+    // --- ጥብቅ Multi-Tenant የሱቆች መዋቅር (stores/{storeId}/...) ---
+    // እያንዳንዱ ነጋዴ በራሱ storeId ስር ብቻ መረጃዎችን ያነባል/ይጽፋል
+    match /stores/{storeId} {
+      // አዲስ ንግድ ሲመዘገብ የራሱን ሱቅ መፍጠር ይችላል
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if isTenantMember(storeId);
+
+      // ንዑስ ሰነዶች (Inventory, Sales, Employees, Shipments, Expenses, Customers)
+      match /{subcollection}/{docId} {
+        allow read, write: if isTenantMember(storeId) ||
+          (resource == null || resource.data.storeId == storeId || resource.data.store_id == storeId);
+      }
+    }
+
+    // --- የተለየ የሱቆች መዝገብ (shops/{store_id}) ---
+    match /shops/{storeId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if true;
+
+      match /{subcollection}/{docId} {
+        allow read, write: if true;
+      }
+    }
+
+    // --- 1. የተጠቃሚዎች መዝገብ (Users) ---
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if isAuthenticated() && (
+        isSuperAdmin() || 
+        request.auth.uid == userId ||
+        (resource.data.store_id != null && resource.data.store_id == getUserData().store_id) ||
+        (resource.data.storeId != null && resource.data.storeId == getUserData().storeId)
+      );
+    }
+
+    // --- 2. የዕቃ፣ የሽያጭ እና የወጪ መዝገቦች (Products / Inventory, Sales, Expenses) ---
+    // የትኛውም ቢዝነስ የሌላውን ቢዝነስ እቃ፣ ሽያጭ ወይም ሪፖርት እንዳይነካ በ storeId ተገድቧል
+    match /products/{productId} {
+      allow read: if isAuthenticated() && (isSuperAdmin() || resource.data.store_id == getUserData().store_id || resource.data.storeId == getUserData().storeId || (request.auth.token != null && request.auth.token.storeId == resource.data.storeId));
+      allow write: if isAuthenticated() && (isSuperAdmin() || request.resource.data.store_id == getUserData().store_id || request.resource.data.storeId == getUserData().storeId || (request.auth.token != null && request.auth.token.storeId == request.resource.data.storeId));
+    }
+
+    match /sales/{saleId} {
+      allow read: if isAuthenticated() && (isSuperAdmin() || resource.data.store_id == getUserData().store_id || resource.data.storeId == getUserData().storeId || (request.auth.token != null && request.auth.token.storeId == resource.data.storeId));
+      allow create: if isAuthenticated() || (request.resource.data.keys().hasAll(['storeId', 'total_amount']) || request.resource.data.keys().hasAll(['store_id', 'total_amount']));
+      allow update, delete: if isAuthenticated() && (isSuperAdmin() || resource.data.store_id == getUserData().store_id || resource.data.storeId == getUserData().storeId);
+    }
+
+    match /expenses/{expenseId} {
+      allow read, write: if isAuthenticated() && (isSuperAdmin() || resource.data.store_id == getUserData().store_id || resource.data.storeId == getUserData().storeId || (request.auth.token != null && request.auth.token.storeId == resource.data.storeId));
+    }
+
+  }
+}

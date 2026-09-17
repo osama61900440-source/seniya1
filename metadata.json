@@ -1,0 +1,6 @@
+{
+  "name": "የሱቅ መቆጣጠሪያ ሲስተም",
+  "description": "ኦፍላይን-መጀመሪያ የሱቅ ሽያጭ፣ ወጪ እና ካፒታል መቆጣጠሪያ",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
